@@ -182,89 +182,60 @@ export default class OracleDriver extends AbstractDriver<OracleDBLib.Pool, PoolC
           });
         });
       }
-
     });
   }
 
-  public calTime(str:string){
-    let date:Date = new Date();
-    this.log.info(str + date.toLocaleTimeString());
-  }
-
   public query: (typeof AbstractDriver)['prototype']['query'] = async (query, opt = {}) => {
-    return await this.open().then(async (conn): Promise<NSDatabase.IResult[]> => {
-      const { requestId } = opt;
-      return new Promise(async (resolve, reject) => {
-          let currentQuery:string;
-          let resultsAgg: NSDatabase.IResult[] = [];
-          const messages = [];
-          let row,column;
-          try{
-            // if (err) return reject(err);
-            // this.calTime("before parse");
-            const parseQueries = parse(query.toString());
-            // this.calTime("after parse");
-            const queries = parseQueries.queries;
-            const isSelectQueries = parseQueries.isSelectQueries;
-            const rows = parseQueries.rows;
-            const columns = parseQueries.columns;
-            let binds = {};
-            let options = {
-              outFormat: this.lib.OUT_FORMAT_OBJECT,   // query result format
-              dmlRowCounts: true,                      //the number of rows affected by each input row
-              autoCommit: this.autoCommit,   //control autocommit
-              maxRows: this.maxRows
-            };
-            // conn.execute(`ALTER SESSION SET NLS_NUMERIC_CHARACTERS = '.,'`);
-            let rowsAffectedAll: number = 0;
-            let selectQueryNum: number = 0;
-            let DbmsOut: string = '';
-            // enable dbms_output
-            await conn.execute(`
-              BEGIN
-                DBMS_OUTPUT.ENABLE(NULL);
-              END;`);
+    const messages = [];
+    const { requestId } = opt;
+    let orcConn: OracleDBLib.Connection;
+    return await this.open()
+      .then(async (conn: OracleDBLib.Connection) => {
+        orcConn = conn;
+        const resultsAgg: NSDatabase.IResult[] = [];
+        const parseQueries = parse(query.toString());
+        
+        const options = {
+          outFormat: this.lib.OUT_FORMAT_OBJECT,
+          dmlRowCounts: true,
+          autoCommit: this.autoCommit,
+          maxRows: this.maxRows
+        };
 
-              
-            let executeCost = 0;
+        await conn.execute(`
+          BEGIN
+            DBMS_OUTPUT.ENABLE(NULL);
+          END;`);
 
-            for (var i =0;i<queries.length;i++) {
-              let q = queries[i];
-              // console.log(q);
-              currentQuery = q;
-              row = rows[i];
-              column = columns[i];
-              
-              let startTime = performance.now();
-              let res: any = await conn.execute(q,binds,options) || [];
-              let endTime = performance.now();
+        for (const q of parseQueries.queries) {
+          const res: any = await conn.execute(q,{},options) || [];
 
-              executeCost += (endTime - startTime);
-              if (res.rowsAffected) {
-                rowsAffectedAll += res.rowsAffected;
-              }
-
-              if(isSelectQueries[i]){
-                selectQueryNum += 1;
-              }
-
-              if(isSelectQueries[i]){
-                resultsAgg.push(<NSDatabase.IResult>{
-                  requestId,
-                  resultId: generateId(),
-                  connId: this.getId(),
-                  cols: (res.rows && res.rows.length>0) ? Object.keys(res.rows[0]) : [],
-                  messages,
-                  query: q,
-                  results: res.rows,
-                });
-              }
-            }
-            // this.calTime("after execute");
-            // DBMS_OUTPUT
-            let result;
+          if(res.rowsAffected != undefined){
+            messages.push(this.prepareMessage(`${res.rowsAffected} rows were affected.`));
+            resultsAgg.push(<NSDatabase.IResult>{
+              requestId,
+              resultId: generateId(),
+              connId: this.getId(),
+              cols: ['rowsAffted'],
+              messages,
+              query: q,
+              results: [{'rowsAffted':res.rowsAffected+' rows were affected.'}],
+            });
+          } else if(res.rows){
+            resultsAgg.push(<NSDatabase.IResult>{
+              requestId,
+              resultId: generateId(),
+              connId: this.getId(),
+              cols: (res.rows && res.rows.length>0) ? Object.keys(res.rows[0]) : [],
+              messages,
+              query: q,
+              results: res.rows,
+            });
+          } else if (Object.keys(res).length === 0) {
+            let outputResult = '';
+            let getLineRes;
             do {
-              result = await conn.execute(
+              getLineRes = await conn.execute(
                 `BEGIN
                   DBMS_OUTPUT.GET_LINE(:ln, :st);
                   END;`,
@@ -272,66 +243,46 @@ export default class OracleDriver extends AbstractDriver<OracleDBLib.Pool, PoolC
                     st: { dir: this.lib.BIND_OUT, type: this.lib.NUMBER }
                   }
               );
-              if (result.outBinds.st === 0)
-                DbmsOut += (result.outBinds.ln + "\n") ;
-            } while (result.outBinds.st === 0);
-            
-            if(DbmsOut.length > 0){
-              let DbmsOuta = DbmsOut;
-              DbmsOuta = '\n-----------------------DBMS_OUTPUT START-----------------------\n' + DbmsOuta;
-              DbmsOuta = DbmsOuta + '-----------------------DBMS_OUTPUT END-----------------------';
-              this.log.info(DbmsOuta);
-            }
-            this.log.info(`cost :${executeCost.toFixed(2)}ms`);
+              if (getLineRes.outBinds.st === 0)
+                outputResult += (getLineRes.outBinds.ln + "\n") ;
+            } while (getLineRes.outBinds.st === 0);
 
-            if((rowsAffectedAll>0) || (selectQueryNum < queries.length) || (DbmsOut.length > 0)){
-              let executeTime = new Date();
-              resultsAgg.push(<NSDatabase.IResult>{
-                requestId,
-                resultId: generateId(),
-                connId: this.getId(),
-                cols: ['executeTime', 'rowsAffted', 'DBMS_OUTPUT',],
-                messages,
-                query: 'summary',
-                results: [{'rowsAffted':rowsAffectedAll+' rows were affected','DBMS_OUTPUT':DbmsOut,'executeTime':executeTime.toLocaleTimeString()}],
-              });
-            }
-            messages.push(query.toString());
-            fs.writeFileSync(Oracle_Diagnosis_Path,JSON.stringify({"state":"0","query":query.toString()}));
-            return resolve(resultsAgg);
-          }catch(err){
-            console.log(currentQuery);
-            console.log(err);
-            for(var i=0;i<err.offset;i++){
-              ++column;
-              if(currentQuery[i] == '\n'){
-                ++row;
-                column = 1;
-              }
-            }
-            messages.push(err.message+'\n'+'intra-block-posi:('+row+','+column+')');
+            messages.push(this.prepareMessage(outputResult));
             resultsAgg.push(<NSDatabase.IResult>{
               requestId,
               resultId: generateId(),
               connId: this.getId(),
-              cols: [],
+              cols: ['DBMS_OUTPUT'],
               messages,
-              error: true,
-              rawError: err,
-              query: currentQuery,
-              results: [],
+              query: q,
+              results: [{'DBMS_OUTPUT':outputResult}],
             });
-            let data = JSON.stringify({"state":"0","query":query.toString(),"currentQuery":currentQuery,"message":err.message,"row":row-1,'column':column-1, "offset":err.offset});
-            fs.writeFileSync(Oracle_Diagnosis_Path,data);
-            return resolve(resultsAgg);
-          }finally {
-            if (conn) {
-              await conn.close();
-            }
-            // this.calTime("finally");
           }
+        }
+
+        return resultsAgg;
+      })
+      .catch((err) => {
+        return [<NSDatabase.IResult>{
+          connId: this.getId(),
+          requestId,
+          resultId: generateId(),
+          cols: [],
+          messages: messages.concat([
+            this.prepareMessage ([
+              (err && err.message || err),
+              err && err.routine === 'scanner_yyerror' && err.position ? `at character ${err.position}` : undefined
+            ].filter(Boolean).join(' '))
+          ]),
+          error: true,
+          rawError: err,
+          query,
+          results: [],
+        }];
+      })
+      .finally(() => {
+        orcConn.close();
       });
-    });
   }
 
   /** if you need a different way to test your connection, you can set it here.
@@ -347,16 +298,25 @@ export default class OracleDriver extends AbstractDriver<OracleDBLib.Pool, PoolC
    * it gets the child items based on current item
    */
   public async getChildrenForItem({ item, parent }: Arg0<IConnectionDriver['getChildrenForItem']>) {
-    switch (item.type) {
+    switch (item.type as string) {
       case ContextValue.CONNECTION:
       case ContextValue.CONNECTED_CONNECTION:
         return <MConnectionExplorer.IChildItem[]>[
           { label: 'Tables', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: ContextValue.TABLE },
           { label: 'Views', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: ContextValue.VIEW },
+          { label: 'Indexes', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: 'INDEX' },
+          { label: 'Packages', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: 'PACKAGE' },
+          { label: 'Procedures', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: 'PROCEDURE' },
+          { label: 'TestFunctions', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: ContextValue.FUNCTION },
         ];
       case ContextValue.TABLE:
       case ContextValue.VIEW:
-       return this.queryResults(this.queries.fetchColumns(item as NSDatabase.ITable)); 
+        return this.queryResults(this.queries.fetchColumns(item as NSDatabase.ITable));
+      case 'PACKAGE':
+        return this.queryResults(this.queries.fetchPackageDetails(item as NSDatabase.ISchema));
+      case 'PROCEDURE':
+      case ContextValue.FUNCTION:
+        return this.queryResults(this.queries.fetchProcedureDetails(item as NSDatabase.ISchema));
       case ContextValue.RESOURCE_GROUP:
         return this.getChildrenForGroup({ item, parent });
     }
@@ -368,11 +328,19 @@ export default class OracleDriver extends AbstractDriver<OracleDBLib.Pool, PoolC
    * It gets the child based on child types
    */
   private async getChildrenForGroup({ parent, item }: Arg0<IConnectionDriver['getChildrenForItem']>) {
-    switch (item.childType) {
+    switch (item.childType as string) {
       case ContextValue.TABLE:
         return this.queryResults(this.queries.fetchTables(parent as NSDatabase.ISchema));
       case ContextValue.VIEW: 
         return this.queryResults(this.queries.fetchViews(parent as NSDatabase.ISchema));
+      case ContextValue.FUNCTION:
+        return this.queryResults(this.queries.fetchFunctions(parent as NSDatabase.ISchema));
+      case 'INDEX':
+        return this.queryResults(this.queries.fetchIndexes(parent as NSDatabase.ISchema));
+      case 'PACKAGE':
+        return this.queryResults(this.queries.fetchPackages(parent as NSDatabase.ISchema));
+      case 'PROCEDURE':
+        return this.queryResults(this.queries.fetchProcedures(parent as NSDatabase.ISchema));
     }
     return [];
   }

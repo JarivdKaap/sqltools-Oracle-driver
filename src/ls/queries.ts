@@ -73,6 +73,81 @@ select t.view_name as "label",
  decode(t.owner,user,0,1),
  t.view_name
 `;
+const fetchIndexes: IBaseQueries['fetchTables'] = queryFactory`
+select t.index_name as "label",
+       'INDEX' as "type",
+       SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
+       0 as "isView",
+       '${ContextValue.NO_CHILD}' as "childType"
+  from user_indexes t
+ order by
+ t.index_name
+`;
+const fetchPackages: IBaseQueries['fetchTables'] = queryFactory`
+select t.object_name as "label",
+       t.object_name as "object_name",
+       'PACKAGE' as "type",
+       SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
+       0 as "isView"
+  from user_objects t
+ where t.object_type = 'PACKAGE'
+ order by
+ t.object_name
+`;
+const fetchPackageDetails: IBaseQueries['fetchTables'] = queryFactory`
+select t.object_name||' Body' as "label",
+       'PACKAGE_BODY' as "type",
+       SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
+       0 as "isView",
+       'ARGUMENTS' as "childType",
+       0 as seq
+  from user_objects t
+ where t.object_type = 'PACKAGE BODY'
+   and object_name = '${p => p.object_name}'
+ union all
+ select t.procedure_name as "label",
+       'ARGUMENTS' as "type",
+       SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
+       0 as "isView",
+       '${ContextValue.NO_CHILD}' as "childType",
+       t.subprogram_id as seq
+  from user_procedures t
+ where t.object_type = 'PACKAGE'
+   and object_name = '${p => p.object_name}'
+   and t.procedure_name is not null
+ order by seq, "label"
+`;
+const fetchProcedures: IBaseQueries['fetchTables'] = queryFactory`
+select t.object_name as "label",
+       'PROCEDURE' as "type",
+       SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
+       0 as "isView"
+  from user_objects t
+ where t.object_type = 'PROCEDURE'
+ order by
+ t.object_name
+`;
+const fetchProcedureDetails: IBaseQueries['fetchTables'] = queryFactory`
+select argument_name as "label",
+       'ARGUMENT' as "type",
+       data_type as "dataType",
+       default_value as "defaultValue",
+       '${ContextValue.NO_CHILD}' as "childType"
+  from user_arguments
+ where object_name = 'CONCATENATE'
+   and argument_name is not null
+ order by sequence
+`;
+const fetchFunctions: IBaseQueries['fetchTables'] = queryFactory`
+select t.object_name as "label",
+       '${ContextValue.FUNCTION}' as "type",
+       SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
+       0 as "isView"
+  from user_objects t
+ where t.object_type = 'FUNCTION'
+ order by
+ t.object_name
+`;
 
 const searchTables: IBaseQueries['searchTables'] = queryFactory`
 select  t.label        "label",
@@ -184,6 +259,12 @@ export default {
   fetchRecords,
   fetchTables,
   fetchViews,
+  fetchIndexes,
+  fetchPackages,
+  fetchPackageDetails,
+  fetchProcedures,
+  fetchFunctions,
+  fetchProcedureDetails,
   searchTables,
   searchColumns
 }
