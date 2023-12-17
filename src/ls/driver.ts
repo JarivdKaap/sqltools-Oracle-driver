@@ -307,7 +307,7 @@ export default class OracleDriver extends AbstractDriver<OracleDBLib.Pool, PoolC
           { label: 'Indexes', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: 'INDEX' },
           { label: 'Packages', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: 'PACKAGE' },
           { label: 'Procedures', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: 'PROCEDURE' },
-          { label: 'TestFunctions', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: ContextValue.FUNCTION },
+          { label: 'Functions', type: ContextValue.RESOURCE_GROUP, iconId: 'folder', childType: ContextValue.FUNCTION },
         ];
       case ContextValue.TABLE:
       case ContextValue.VIEW:

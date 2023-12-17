@@ -78,7 +78,8 @@ select t.index_name as "label",
        'INDEX' as "type",
        SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
        0 as "isView",
-       '${ContextValue.NO_CHILD}' as "childType"
+       '${ContextValue.NO_CHILD}' as "childType",
+       'symbol-object' as "iconId"
   from user_indexes t
  order by
  t.index_name
@@ -88,7 +89,8 @@ select t.object_name as "label",
        t.object_name as "object_name",
        'PACKAGE' as "type",
        SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
-       0 as "isView"
+       0 as "isView",
+       'symbol-package' as "iconId"
   from user_objects t
  where t.object_type = 'PACKAGE'
  order by
@@ -100,7 +102,8 @@ select t.object_name||' Body' as "label",
        SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
        0 as "isView",
        'ARGUMENTS' as "childType",
-       0 as seq
+       0 as seq,
+       'symbol-package' as "iconId"
   from user_objects t
  where t.object_type = 'PACKAGE BODY'
    and object_name = '${p => p.object_name}'
@@ -110,7 +113,14 @@ select t.object_name||' Body' as "label",
        SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
        0 as "isView",
        '${ContextValue.NO_CHILD}' as "childType",
-       t.subprogram_id as seq
+       t.subprogram_id as seq,
+       case when exists (
+          select 1
+            from user_arguments a
+            where a.object_name = t.procedure_name
+              and a.package_name = t.object_name
+              and a.in_out = 'OUT'
+         ) THEN 'symbol-method' ELSE 'symbol-function' END as "iconId"
   from user_procedures t
  where t.object_type = 'PACKAGE'
    and object_name = '${p => p.object_name}'
@@ -121,7 +131,8 @@ const fetchProcedures: IBaseQueries['fetchTables'] = queryFactory`
 select t.object_name as "label",
        'PROCEDURE' as "type",
        SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
-       0 as "isView"
+       0 as "isView",
+       'symbol-method' as "iconId"
   from user_objects t
  where t.object_type = 'PROCEDURE'
  order by
@@ -132,7 +143,8 @@ select argument_name as "label",
        'ARGUMENT' as "type",
        data_type as "dataType",
        default_value as "defaultValue",
-       '${ContextValue.NO_CHILD}' as "childType"
+       '${ContextValue.NO_CHILD}' as "childType",
+       'symbol-module' as "iconId"
   from user_arguments
  where object_name = 'CONCATENATE'
    and argument_name is not null
@@ -142,7 +154,8 @@ const fetchFunctions: IBaseQueries['fetchTables'] = queryFactory`
 select t.object_name as "label",
        '${ContextValue.FUNCTION}' as "type",
        SYS_CONTEXT ('USERENV', 'DB_NAME') as "database",
-       0 as "isView"
+       0 as "isView",
+       'symbol-function' as "iconId"
   from user_objects t
  where t.object_type = 'FUNCTION'
  order by
